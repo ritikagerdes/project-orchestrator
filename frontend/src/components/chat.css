@@ -1,0 +1,34 @@
+/* ...existing code... */
+.chat-button {
+  position: fixed;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #2563eb;
+  color: #fff;
+  padding: 10px 12px;
+  border-radius: 999px;
+  box-shadow: 0 8px 20px rgba(37,99,235,0.18);
+  cursor: pointer;
+  user-select: none;
+  font-weight: 600;
+}
+.chat-btn-right { right: 20px; bottom: 20px; }
+.chat-btn-left  { left: 20px; bottom: 20px; }
+
+.chat-icon { font-size: 16px; line-height: 1; }
+.chat-label { font-size: 13px; }
+
+.chat-window {
+  position: fixed;
+  width: 360px;
+  z-index: 9998;
+  border: 1px solid #e6eef8;
+  border-radius: 8px;
+  background: #f9fbff;
+  box-shadow: 0 12px 40px rgba(2,6,23,0.12);
+  overflow: hidden;
+}
+.chat-window.chat-btn-right { right: 20px; bottom: 76px; }
+.chat-window.chat-btn-left  { left: 20px; bottom: 76px; }

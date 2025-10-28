@@ -1,0 +1,9 @@
+# Node engine suggestion
+node >= 18
+npm >= 9
+
+# Frontend dependencies (match package.json)
+react@^18.2.0
+react-dom@^18.2.0
+react-scripts@5.0.1
+axios@^1.4.0
