@@ -1,16 +1,30 @@
-from fastapi import FastAPI, HTTPException, Depends, Body
+from fastapi import FastAPI, HTTPException, Depends, Body, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Dict, Any, Optional, List
 import os
-import json
+import time
 import base64
+import io
+from uuid import uuid4
+from pathlib import Path
+from fastapi import Request
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import StreamingResponse, JSONResponse, FileResponse
+from app.hubspot_client import create_contact, create_note_for_contact
+from reportlab.lib.pagesizes import letter
+from reportlab.pdfgen import canvas
+import zipfile
+import tempfile
 
 from app.db import get_db, init_db, DEFAULT_RATE_CARD
 from app.agents import DevelopmentProposalOrchestrator
 from app.dropbox_client import DropboxClient
 from app.sow_parsing import SowParser
 from app.models import RateCardIn, RateCardOut
+import asyncio
+from app.embeddings_indexer import index_once, periodic_indexer
+from app.vector_store import PineconeStore
 
 app = FastAPI(title="Proposal Orchestrator API")
 
@@ -159,19 +173,37 @@ def update_rate_card(payload: Dict[str, Any] = Body(...), db = Depends(get_db)):
         card = payload
 
     try:
-        if hasattr(orchestrator, "update_rate_card"):
-            orchestrator.update_rate_card(card)
-        else:
-            raise RuntimeError("orchestrator cannot update rate card")
-    except Exception:
+        # Always update the persistent store first (so DB reflects changes)
         try:
             store = db or None
             if store is not None:
                 store.update_rate_card(card)
         except Exception:
+            # swallow — will try orchestrator below
             pass
 
-    return {"status": "ok"}
+        # Then notify orchestrator so its cache/logic is in sync (if implemented)
+        try:
+            if hasattr(orchestrator, "update_rate_card"):
+                orchestrator.update_rate_card(card)
+        except Exception:
+            pass
+
+        # Return the authoritative current rate card (read from DB if available)
+        try:
+            store = db or None
+            if store is not None:
+                current = store.get_rate_card()
+            elif hasattr(orchestrator, "get_rate_card"):
+                current = orchestrator.get_rate_card()
+            else:
+                current = DEFAULT_RATE_CARD.copy()
+        except Exception:
+            current = DEFAULT_RATE_CARD.copy()
+
+        return {"status": "ok", "rates": current}
+    except Exception:
+        return {"status": "error"}
 
 @app.post("/api/admin/import_sows")
 def import_sows(req: ImportSowsRequest):
@@ -199,3 +231,305 @@ def get_admin_settings():
 def put_admin_settings(payload: AdminSettings):
     data = _write_settings(payload.dict())
     return data
+
+@app.post("/api/chat/save")
+def save_chat(payload: Dict[str, Any] = Body(...)):
+    """
+    Save chat/messages into SowKnowledgeStore (metadata includes chat).
+    payload: { title?: str, messages: [ {from, text} ], meta?: {} }
+    Persist via orchestrator.ingest_chat so historic chats are usable for training/insights.
+    """
+    msgs = payload.get("messages") or []
+    title = payload.get("title") or f"chat-{int(datetime.utcnow().timestamp())}.txt"
+    meta = payload.get("meta") or {}
+    try:
+        # use orchestrator ingest_chat to persist and extract features/prices
+        orchestrator.ingest_chat(msgs, {"name": title, **meta})
+        return {"status": "ok", "saved_as": title}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+def _make_pdf_bytes(sow_text: str, estimate: dict, title: str = "Project Quote") -> bytes:
+    """
+    Simple PDF renderer using reportlab. Produces a readable multi-page PDF.
+    """
+    try:
+        buf = io.BytesIO()
+        c = canvas.Canvas(buf, pagesize=letter)
+        width, height = letter
+
+        margin_x = 72
+        y = height - 72
+
+        # Title
+        c.setFont("Helvetica-Bold", 16)
+        c.drawString(margin_x, y, title)
+        y -= 28
+
+        # metadata / estimate summary (if present)
+        if estimate:
+            c.setFont("Helvetica-Bold", 12)
+            c.drawString(margin_x, y, "Estimate Summary")
+            y -= 18
+            c.setFont("Helvetica", 10)
+            summary_lines = []
+            if estimate.get("totalCost") is not None:
+                summary_lines.append(f"Total cost: ${estimate.get('totalCost')}")
+            if estimate.get("totalHours") is not None:
+                summary_lines.append(f"Total hours: {estimate.get('totalHours')}")
+            for ln in summary_lines:
+                if y < 72:
+                    c.showPage()
+                    y = height - 72
+                    c.setFont("Helvetica", 10)
+                c.drawString(margin_x, y, ln)
+                y -= 14
+            y -= 6
+
+        # SOW / body
+        c.setFont("Helvetica-Bold", 12)
+        if y < 72:
+            c.showPage()
+            y = height - 72
+        c.drawString(margin_x, y, "SOW / Details")
+        y -= 18
+        c.setFont("Helvetica", 10)
+
+        for raw_line in (sow_text or "").splitlines():
+            line = raw_line.rstrip()
+            # wrap long lines to page width
+            while line:
+                # approx characters per line
+                max_chars = 95
+                piece = line[:max_chars]
+                line = line[max_chars:]
+                if y < 72:
+                    c.showPage()
+                    y = height - 72
+                    c.setFont("Helvetica", 10)
+                c.drawString(margin_x, y, piece)
+                y -= 14
+
+        c.save()
+        buf.seek(0)
+        return buf.read()
+    except Exception as e:
+        # bubble up to caller
+        raise
+
+@app.post("/api/sow/pdf")
+def generate_sow_pdf(payload: Dict[str, Any] = Body(...)):
+    """
+    payload: { sow_text?: str, sow_b64?: base64str, estimate?: {...}, title?: str }
+    Returns binary PDF stream.
+    """
+    sow_text = payload.get("sow_text") or ""
+    sow_b64 = payload.get("sow_b64")
+    if sow_b64:
+        try:
+            sow_text = base64.b64decode(sow_b64).decode("utf-8")
+        except Exception:
+            # ignore decode error and fallback to provided sow_text
+            pass
+    estimate = payload.get("estimate") or {}
+    title = payload.get("title") or "Project Quote"
+
+    try:
+        pdf_bytes = _make_pdf_bytes(sow_text, estimate, title)
+        return StreamingResponse(io.BytesIO(pdf_bytes), media_type="application/pdf", headers={
+            "Content-Disposition": f'attachment; filename="{title.replace(" ", "_")}.pdf"'
+        })
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/hubspot/send")
+def send_to_hubspot(payload: Dict[str, Any] = Body(...)):
+    """
+    payload: { name, email, message, sow_b64?, chat?: messages[] }
+    Creates a contact and a note with SOW/chat.
+    """
+    name = payload.get("name")
+    email = payload.get("email")
+    message = payload.get("message", "")
+    sow_b64 = payload.get("sow_b64")
+    chat = payload.get("chat", [])
+
+    if not email or not name:
+        raise HTTPException(status_code=400, detail="name and email required")
+
+    try:
+        contact = create_contact(name=name, email=email, extra={"notes": message})
+        contact_id = contact.get("id")
+        note_text = f"Project quote from chat. Message: {message}\n\nChat transcript:\n"
+        for m in (chat or []):
+            who = m.get("from")
+            text = m.get("text")
+            note_text += f"{who}: {text}\n"
+        if sow_b64:
+            try:
+                sow_text = base64.b64decode(sow_b64).decode("utf-8")
+                note_text += "\nSOW:\n" + sow_text
+            except Exception:
+                pass
+        # create a note and associate
+        create_note_for_contact(contact_id, note_text)
+        return {"status": "ok", "contact_id": contact_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.on_event("startup")
+async def startup_tasks():
+    # start embeddings indexer in background if configured
+    db_path = DB_PATH
+    try:
+        # run periodic_indexer as a background task only if OPENAI_API_KEY present
+        if os.getenv("OPENAI_API_KEY"):
+            # schedule background coroutine
+            asyncio.create_task(periodic_indexer(db_path=db_path))
+            print("Started embeddings periodic indexer (background task).")
+        else:
+            print("OPENAI_API_KEY not set; embeddings indexer not started.")
+    except Exception as e:
+        print("startup_tasks error:", e)
+
+# ensure DB_PATH defined
+DB_PATH = os.getenv("DB_PATH", "data.sqlite")
+
+# create folder to store generated PDFs
+SOW_DIR = Path(__file__).resolve().parents[1] / "sow_files"
+SOW_DIR.mkdir(parents=True, exist_ok=True)
+
+# mount static files so generated PDFs are downloadable
+app.mount("/sow", StaticFiles(directory=str(SOW_DIR)), name="sow_files")
+
+@app.post("/api/sow/create")
+def create_sow_pdf(payload: Dict[str, Any] = Body(...), request: Request = None):
+    """
+    Persist a generated SOW/estimate PDF on disk and return a download URL.
+    payload: { sow_text?: str, sow_b64?: base64str, estimate?: {...}, title?: str }
+    """
+    sow_text = payload.get("sow_text", "")
+    sow_b64 = payload.get("sow_b64")
+    if sow_b64:
+        try:
+            sow_text = base64.b64decode(sow_b64).decode("utf-8")
+        except Exception:
+            # if not decodable, treat sow_b64 as raw text
+            sow_text = sow_b64
+
+    estimate = payload.get("estimate") or {}
+    title = payload.get("title") or "Project_Quote"
+
+    try:
+        pdf_bytes = _make_pdf_bytes(sow_text, estimate, title)
+        filename = f"{int(time.time())}-{uuid4().hex}.pdf"
+        out_path = SOW_DIR / filename
+        with open(out_path, "wb") as fh:
+            fh.write(pdf_bytes)
+
+        base = ""
+        if request:
+            base = str(request.base_url).rstrip("/")
+        download_url = f"{base}/sow/{filename}" if base else f"/sow/{filename}"
+        return {"status": "ok", "download_url": download_url}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/share/zip")
+def create_share_zip(payload: Dict[str, Any] = Body(...), request: Request = None):
+    """
+    Create a ZIP containing:
+      - chat text file (chat-<timestamp>.txt)
+      - quote PDF (if sow_b64 present) (quote-<timestamp>.pdf)
+    Returns the ZIP as a FileResponse for immediate download.
+    payload: { messages: [{from, text}], sow_b64?: base64str, estimate?: {...}, title?: str }
+    """
+    try:
+        title = payload.get("title") or f"share-{int(time.time())}"
+        messages = payload.get("messages", [])
+        sow_b64 = payload.get("sow_b64")
+        estimate = payload.get("estimate") or {}
+
+        # ensure output directory exists
+        out_dir = SOW_DIR
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        # write chat text
+        chat_filename = f"{title}-chat.txt"
+        chat_path = out_dir / chat_filename
+        with open(chat_path, "w", encoding="utf-8") as fh:
+            for m in messages:
+                who = m.get("from", "unknown")
+                text = (m.get("text") or "").replace("\r", "")
+                fh.write(f"{who}: {text}\n\n")
+
+        files_to_zip = [chat_path]
+
+        # create PDF if sow_b64 provided
+        if sow_b64:
+            try:
+                sow_text = base64.b64decode(sow_b64).decode("utf-8")
+            except Exception:
+                sow_text = sow_b64 or ""
+            pdf_bytes = _make_pdf_bytes(sow_text, estimate, title)
+            pdf_filename = f"{title}-quote.pdf"
+            pdf_path = out_dir / pdf_filename
+            with open(pdf_path, "wb") as fh:
+                fh.write(pdf_bytes)
+            files_to_zip.append(pdf_path)
+
+        # create zip
+        zip_filename = f"{title}.zip"
+        zip_path = out_dir / zip_filename
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            for p in files_to_zip:
+                zf.write(p, arcname=p.name)
+
+        # return zip as file response
+        return FileResponse(path=str(zip_path), media_type="application/zip", filename=zip_filename)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/admin/embeddings")
+def admin_list_embeddings(db = Depends(get_db)):
+    """
+    Return list of SOWs and whether they have embeddings in the vector store.
+    """
+    try:
+        sow_store = db.__class__(db_path=DB_PATH) if db else None
+    except Exception:
+        sow_store = None
+
+    pine = PineconeStore(db_path=DB_PATH)
+    rows = []
+    try:
+        sow_kb = SowKnowledgeStore(db_path=DB_PATH)
+        all_sows = sow_kb.get_all()
+        for s in all_sows:
+            has_vector = False
+            try:
+                v = pine.fetch_vector(s["id"])
+                has_vector = bool(v)
+            except Exception:
+                has_vector = False
+            rows.append({"id": s["id"], "filename": s.get("filename"), "final_price": s.get("final_price"), "has_vector": has_vector, "metadata": s.get("metadata")})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    return {"status": "ok", "items": rows}
+
+@app.post("/api/admin/reindex")
+async def admin_reindex(background: bool = Body(True)):
+    """
+    Trigger a reindex. If background True, schedule and return immediately.
+    """
+    try:
+        if background:
+            # schedule background task
+            import asyncio
+            asyncio.create_task(index_once(db_path=DB_PATH))
+            return {"status": "ok", "message": "Reindex scheduled"}
+        else:
+            await index_once(db_path=DB_PATH)
+            return {"status": "ok", "message": "Reindex completed"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

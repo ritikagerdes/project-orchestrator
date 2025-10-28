@@ -1,7 +1,7 @@
 from contextlib import contextmanager
 import os
 import json
-from typing import Generator, Optional, List, Dict
+from typing import Generator, Optional, List, Dict, Any
 
 from sqlalchemy import create_engine, Column, Integer, String, Float, Text
 from sqlalchemy.ext.declarative import declarative_base
@@ -12,6 +12,7 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False)
 
 RATE_CARD_TABLE = "rate_card"
 SOW_KB_TABLE = "sow_kb"
+EMBED_TABLE = "embeddings"
 
 class RateCardModel(Base):
     __tablename__ = RATE_CARD_TABLE
@@ -25,6 +26,13 @@ class SowKBModel(Base):
     filename = Column(String)
     features_json = Column(Text)  # JSON text
     final_price = Column(Float)
+    metadata_json = Column(Text)
+
+class EmbeddingModel(Base):
+    __tablename__ = EMBED_TABLE
+    id = Column(Integer, primary_key=True, index=True)
+    sow_id = Column(Integer, nullable=False, index=True)
+    vector_json = Column(Text)  # JSON text of float array
     metadata_json = Column(Text)
 
 def get_engine(db_path: str):
@@ -146,6 +154,46 @@ class SowKnowledgeStore:
                     "filename": r.filename,
                     "features": json.loads(r.features_json) if r.features_json else [],
                     "final_price": r.final_price,
+                    "metadata": json.loads(r.metadata_json) if r.metadata_json else {}
+                })
+            return out
+        finally:
+            session.close()
+
+class EmbeddingStore:
+    def __init__(self, db_path: str = "data.sqlite"):
+        self.db_path = db_path
+        self.engine = get_engine(db_path)
+        try:
+            SessionLocal.configure(bind=self.engine)
+        except Exception:
+            pass
+
+    def upsert_embedding(self, sow_id: int, vector: List[float], metadata: Dict[str, Any]):
+        session = SessionLocal()
+        try:
+            existing = session.query(EmbeddingModel).filter_by(sow_id=sow_id).first()
+            v_json = json.dumps(vector)
+            m_json = json.dumps(metadata or {})
+            if existing:
+                existing.vector_json = v_json
+                existing.metadata_json = m_json
+            else:
+                session.add(EmbeddingModel(sow_id=sow_id, vector_json=v_json, metadata_json=m_json))
+            session.commit()
+        finally:
+            session.close()
+
+    def get_all(self) -> List[Dict]:
+        session = SessionLocal()
+        try:
+            rows = session.query(EmbeddingModel).all()
+            out = []
+            for r in rows:
+                out.append({
+                    "id": r.id,
+                    "sow_id": r.sow_id,
+                    "vector": json.loads(r.vector_json) if r.vector_json else [],
                     "metadata": json.loads(r.metadata_json) if r.metadata_json else {}
                 })
             return out

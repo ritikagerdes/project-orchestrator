@@ -3,20 +3,25 @@ import { BrowserRouter as Router, Routes, Route, Link } from "react-router-dom";
 import Home from "./components/Home";
 import AdminPage from "./components/AdminPage";
 import ChatButton from "./components/ChatButton";
+import EmbeddingsAdmin from "./components/Admin/EmbeddingsAdmin"; // added admin UI import
 
-export default function App() {
+function App() {
   return (
     <Router>
-      <div style={{ padding: 12, borderBottom: "1px solid #eee", display: "flex", justifyContent: "space-between" }}>
-        <div><Link to="/">Proposal Orchestrator</Link></div>
-        <div style={{ gap: 12 }}>
-          <Link to="/admin">Admin</Link>
+      <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: 12, borderBottom: "1px solid #eee", background: "#fff" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <Link to="/" style={{ textDecoration: "none", color: "#111827", fontWeight: 600 }}>Home</Link>
+          <Link to="/projects" style={{ textDecoration: "none", color: "#6b7280" }}>Projects</Link>
         </div>
-      </div>
+        <nav>
+          <Link to="/admin/embeddings" style={{ textDecoration: "none", color: "#1d4ed8", fontWeight: 500 }}>Admin / Embeddings</Link>
+        </nav>
+      </header>
 
       <Routes>
         <Route path="/" element={<Home />} />
         <Route path="/admin" element={<AdminPage />} />
+        <Route path="/admin/embeddings" element={<EmbeddingsAdmin />} /> {/* admin route */}
       </Routes>
 
       {/* Chat button rendered site-wide. AdminPage will render its own preview but this is the production chat. */}
@@ -24,3 +29,5 @@ export default function App() {
     </Router>
   );
 }
+
+export default App;
