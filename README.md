@@ -1,6 +1,6 @@
 # Proposal Orchestrator (Minimal Web App)
 
-This project converts a console-based multi-agent estimation system into a minimal web application with:
+This project is a multi-agent estimation system into a minimal web application with:
 
 - FastAPI backend (backend/app)
 - React frontend (frontend)
