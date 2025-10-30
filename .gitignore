@@ -1,0 +1,12 @@
+# Frontend
+frontend/node_modules/
+
+# Backend
+backend/.venv/
+
+# Common ignores
+*.log
+.env
+__pycache__/
+dist/
+build/
