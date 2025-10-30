@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
-import axios from "axios";
+import api from '../services/axiosConfig';
+
 
 export default function ChatWindow({ onClose, position = "bottom-right", mode = "production" }) {
   const [messages, setMessages] = useState([
@@ -27,7 +28,7 @@ export default function ChatWindow({ onClose, position = "bottom-right", mode = 
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(async () => {
       try {
-        await axios.post("/api/chat/save", { title: `chat-${Date.now()}.json`, messages });
+        await api.post("/api/chat/save", { title: `chat-${Date.now()}.json`, messages });
       } catch (err) {
         // silent
         // eslint-disable-next-line no-console
@@ -54,7 +55,7 @@ export default function ChatWindow({ onClose, position = "bottom-right", mode = 
   async function sendInitial(text) {
     setSending(true);
     try {
-      const res = await axios.post("/api/message", { text, client_info: {}, mode });
+      const res = await api.post("/api/message", { text, client_info: {}, mode });
       const data = res.data;
 
       const contactQs = [];
@@ -98,7 +99,7 @@ export default function ChatWindow({ onClose, position = "bottom-right", mode = 
     setSending(true);
     try {
       const followPayload = { text: lastUserQuery, client_info: { answers }, mode };
-      const res = await axios.post("/api/message", followPayload);
+      const res = await api.post("/api/message", followPayload);
       const data = res.data;
 
       setPendingQuestions([]);
@@ -186,7 +187,7 @@ export default function ChatWindow({ onClose, position = "bottom-right", mode = 
 
       const title = `ProjectQuote-${Date.now()}`;
       const payload = { sow_b64: data.sow, estimate: data.estimate, title };
-      const res = await axios.post("/api/sow/create", payload);
+      const res = await api.post("/api/sow/create", payload);
       const download_url = res?.data?.download_url;
 
       // short message with link only (no sow or estimate text)
@@ -226,7 +227,7 @@ export default function ChatWindow({ onClose, position = "bottom-right", mode = 
         sow_b64,
         chat: messages
       };
-      await axios.post("/api/hubspot/send", payload);
+      await api.post("/api/hubspot/send", payload);
       pushMessage({ from: "bot", text: "Thanks — your lead was sent to our sales team." });
     } catch (err) {
       // eslint-disable-next-line no-console
@@ -256,7 +257,7 @@ export default function ChatWindow({ onClose, position = "bottom-right", mode = 
         sow_b64: latestSowB64,
         estimate: null
       };
-      const resp = await axios.post("/api/share/zip", payload, { responseType: "blob" });
+      const resp = await api.post("/api/share/zip", payload, { responseType: "blob" });
       const blob = new Blob([resp.data], { type: "application/zip" });
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement("a");

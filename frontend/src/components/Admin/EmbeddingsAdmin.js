@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
-import axios from "axios";
+import api from '../../services/axiosConfig';
+
 
 export default function EmbeddingsAdmin() {
   const [items, setItems] = useState([]);
@@ -9,7 +10,7 @@ export default function EmbeddingsAdmin() {
   async function load() {
     setLoading(true);
     try {
-      const res = await axios.get("/api/admin/embeddings");
+      const res = await api.get("/api/admin/embeddings");
       setItems(res.data.items || []);
     } catch (err) {
       console.error(err);
@@ -26,7 +27,7 @@ export default function EmbeddingsAdmin() {
   async function triggerReindex() {
     setReindexing(true);
     try {
-      await axios.post("/api/admin/reindex", { background: true });
+      await api.post("/api/admin/reindex", { background: true });
       // poll for a short while then refresh
       setTimeout(() => load(), 1500);
     } catch (err) {

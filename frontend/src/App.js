@@ -14,7 +14,8 @@ function App() {
           <Link to="/projects" style={{ textDecoration: "none", color: "#6b7280" }}>Projects</Link>
         </div>
         <nav>
-          <Link to="/admin/embeddings" style={{ textDecoration: "none", color: "#1d4ed8", fontWeight: 500 }}>Admin / Embeddings</Link>
+          <Link to="/admin" style={{ textDecoration: "none", color: "#1d4ed8", fontWeight: 500, padding: "10px" }}>Admin</Link>
+          <Link to="/admin/embeddings" style={{ textDecoration: "none", color: "#1d4ed8", fontWeight: 500, padding: "10px" }}>Embeddings</Link>
         </nav>
       </header>
 
@@ -23,9 +24,11 @@ function App() {
         <Route path="/admin" element={<AdminPage />} />
         <Route path="/admin/embeddings" element={<EmbeddingsAdmin />} /> {/* admin route */}
       </Routes>
+import EnvDebug from './components/EnvDebug';
 
-      {/* Chat button rendered site-wide. AdminPage will render its own preview but this is the production chat. */}
+        {/* Chat button rendered site-wide. AdminPage will render its own preview but this is the production chat. */}
       <ChatButton />
+    
     </Router>
   );
 }
