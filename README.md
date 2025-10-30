@@ -22,13 +22,13 @@ Backend — get the API running
    ```
 2. Create and activate a virtual environment:
    ```bash
-   python3 -m venv .venv
+   python3 -m venv .venv OR python -m venv .venv (for Windows)
    source .venv/bin/activate OR .venv\Scripts\Activate.ps1 (for Windows)
    ```
 3. Install Python dependencies:
    ```bash
    python -m pip install --upgrade pip
-   python -m pip install -r requirements.txt or python -m pip install -r requirements-windows.txt
+   python -m pip install -r requirements.txt OR python -m pip install -r requirements-windows.txt  (for Windows)
    ```
 4. (Optional) Set environment variables (example):
    ```bash
