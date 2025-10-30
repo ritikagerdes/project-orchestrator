@@ -1,12 +1,9 @@
 # Frontend
 frontend/node_modules/
 
-# Backend
-backend/.venv/
+# Backend specific ignores
+backend/venv/
+backend/app/
+backend/data.sqllite
 
-# Common ignores
-*.log
-.env
-__pycache__/
-dist/
-build/
+

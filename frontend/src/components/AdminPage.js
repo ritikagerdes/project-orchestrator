@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import axios from "axios";
+import api from '../services/axiosConfig';
 import ChatButton from "./ChatButton";
 
 const CANONICAL_ROLES = {
@@ -24,7 +24,7 @@ export default function AdminPage() {
 
   async function fetchRates() {
     try {
-      const res = await axios.get("/api/admin/ratecard");
+      const res = await api.get("/api/admin/ratecard");
       const fetched = (res.data && res.data.rates) ? res.data.rates : {};
       // if API returned nothing, seed with canonical roles
       const seed = Object.keys(fetched).length ? fetched : CANONICAL_ROLES;
@@ -40,7 +40,7 @@ export default function AdminPage() {
 
   async function fetchSettings() {
     try {
-      const res = await axios.get("/api/admin/settings");
+      const res = await api.get("/api/admin/settings");
       setSettings(res.data || settings);
     } catch (err) {
       // keep defaults if settings not available
@@ -66,7 +66,7 @@ export default function AdminPage() {
   async function saveRateCard() {
     setSaving(true);
     try {
-      await axios.put("/api/admin/ratecard", { rates: editing });
+      await api.put("/api/admin/ratecard", { rates: editing });
       setRates(editing);
       alert("Rate card saved.");
     } catch (err) {
@@ -79,7 +79,7 @@ export default function AdminPage() {
 
   async function saveSettings() {
     try {
-      await axios.put("/api/admin/settings", settings);
+      await api.put("/api/admin/settings", settings);
       alert("Settings saved.");
     } catch (err) {
       console.error("saveSettings", err);

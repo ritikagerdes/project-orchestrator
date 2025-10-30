@@ -1,16 +1,17 @@
 import React, { useEffect, useState } from "react";
-import axios from "axios";
+import api from '../services/axiosConfig';
+
 
 export default function AdminPanel() {
   const [rates, setRates] = useState({});
   const [editing, setEditing] = useState(false);
   useEffect(() => { fetchRates(); }, []);
   async function fetchRates(){
-    const res = await axios.get("/api/admin/ratecard");
+    const res = await api.get("/api/admin/ratecard");
     setRates(res.data.rates);
   }
   async function save(){
-    await axios.put("/api/admin/ratecard", {rates});
+    await api.put("/api/admin/ratecard", {rates});
     setEditing(false);
     fetchRates();
   }

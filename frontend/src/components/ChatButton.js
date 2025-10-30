@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import ChatWindow from "./ChatWindow";
-import axios from "axios";
+import api from '../services/axiosConfig';
+
 import "./chat.css";
 
 export default function ChatButton({ visible: propVisible, position: propPosition, mode }) {
@@ -10,7 +11,7 @@ export default function ChatButton({ visible: propVisible, position: propPositio
 
   useEffect(() => {
     if (typeof propVisible === "undefined" || typeof propPosition === "undefined") {
-      axios.get("/api/admin/settings").then(res => {
+      api.get("/api/admin/settings").then(res => {
         const s = res.data || {};
         if (typeof propVisible === "undefined") setVisible(Boolean(s.chat_enabled));
         if (typeof propPosition === "undefined") setPosition(s.chat_position || "bottom-right");
