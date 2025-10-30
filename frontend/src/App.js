@@ -24,7 +24,6 @@ function App() {
         <Route path="/admin" element={<AdminPage />} />
         <Route path="/admin/embeddings" element={<EmbeddingsAdmin />} /> {/* admin route */}
       </Routes>
-import EnvDebug from './components/EnvDebug';
 
         {/* Chat button rendered site-wide. AdminPage will render its own preview but this is the production chat. */}
       <ChatButton />
